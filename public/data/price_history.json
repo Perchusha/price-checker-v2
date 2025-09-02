@@ -1,0 +1,411 @@
+[
+  {
+    "id": 1756813381115,
+    "product_id": 1756813374585,
+    "price": 301,
+    "checked_at": "2025-09-02T11:43:01.114Z"
+  },
+  {
+    "id": 1756813779735,
+    "product_id": 1756813374585,
+    "price": 699,
+    "checked_at": "2025-09-02T11:49:39.734Z"
+  },
+  {
+    "id": 1756813821637,
+    "product_id": 1756813374585,
+    "price": 699,
+    "checked_at": "2025-09-02T11:50:21.636Z"
+  },
+  {
+    "id": 1756813827531,
+    "product_id": 1756813374585,
+    "price": 699,
+    "checked_at": "2025-09-02T11:50:27.530Z"
+  },
+  {
+    "id": 1756814073119,
+    "product_id": 1756813374585,
+    "price": 649,
+    "store": "Amazon Poland",
+    "checked_at": "2025-09-02T11:54:33.118Z"
+  },
+  {
+    "id": 1756814652937,
+    "product_id": 1756813374585,
+    "price": 649,
+    "store": "Amazon Poland",
+    "checked_at": "2025-09-02T12:04:12.937Z"
+  },
+  {
+    "id": 1756814884152,
+    "product_id": 1756813374585,
+    "price": 649,
+    "store": "Amazon Poland",
+    "checked_at": "2025-09-02T12:08:04.152Z"
+  },
+  {
+    "id": 1756815656812,
+    "product_id": 1756815570395,
+    "price": 771,
+    "store": "Amazon Poland",
+    "checked_at": "2025-09-02T12:20:56.811Z"
+  },
+  {
+    "id": 1756816069287,
+    "product_id": 1756815570395,
+    "price": 771,
+    "store": "Amazon Poland",
+    "checked_at": "2025-09-02T12:27:49.286Z"
+  },
+  {
+    "id": 1756816091403,
+    "product_id": 1756815570395,
+    "price": 771,
+    "store": "Amazon Poland",
+    "checked_at": "2025-09-02T12:28:11.403Z"
+  },
+  {
+    "id": 1756816104960,
+    "product_id": 1756815570395,
+    "price": 771,
+    "store": "Amazon Poland",
+    "checked_at": "2025-09-02T12:28:24.959Z"
+  },
+  {
+    "id": 1756816319686,
+    "product_id": 1756815570395,
+    "price": 771,
+    "store": "Amazon Poland",
+    "checked_at": "2025-09-02T12:31:59.685Z"
+  },
+  {
+    "id": 1756816342300,
+    "product_id": 1756815570395,
+    "price": 771,
+    "store": "Amazon Poland",
+    "checked_at": "2025-09-02T12:32:22.300Z"
+  },
+  {
+    "id": 1756816467709,
+    "product_id": 1756815570395,
+    "price": 771,
+    "store": "Amazon Poland",
+    "checked_at": "2025-09-02T12:34:27.708Z"
+  },
+  {
+    "id": 1756816631044,
+    "product_id": 1756815570395,
+    "price": 771,
+    "store": "Amazon Poland",
+    "checked_at": "2025-09-02T12:37:11.043Z"
+  },
+  {
+    "id": 1756816794008,
+    "product_id": 1756815570395,
+    "price": 771,
+    "store": "Amazon Poland",
+    "checked_at": "2025-09-02T12:39:54.008Z"
+  },
+  {
+    "id": 1756816849665,
+    "product_id": 1756815570395,
+    "price": 771,
+    "store": "Amazon Poland",
+    "checked_at": "2025-09-02T12:40:49.664Z"
+  },
+  {
+    "id": 1756816864407,
+    "product_id": 1756815570395,
+    "price": 771,
+    "store": "Amazon Poland",
+    "checked_at": "2025-09-02T12:41:04.406Z"
+  },
+  {
+    "id": 1756816870451,
+    "product_id": 1756815570395,
+    "price": 771,
+    "store": "Amazon Poland",
+    "checked_at": "2025-09-02T12:41:10.451Z"
+  },
+  {
+    "id": 1756817028937,
+    "product_id": 1756815570395,
+    "price": 771,
+    "store": "Amazon Poland",
+    "checked_at": "2025-09-02T12:43:48.936Z"
+  },
+  {
+    "id": 1756817189383,
+    "product_id": 1756815570395,
+    "price": 771,
+    "store": "Amazon Poland",
+    "checked_at": "2025-09-02T12:46:29.382Z"
+  },
+  {
+    "id": 1756817319592,
+    "product_id": 1756815570395,
+    "price": 771,
+    "store": "Amazon Poland",
+    "checked_at": "2025-09-02T12:48:39.590Z"
+  },
+  {
+    "id": 1756817443578,
+    "product_id": 1756815570395,
+    "price": 771,
+    "store": "Amazon Poland",
+    "checked_at": "2025-09-02T12:50:43.577Z"
+  },
+  {
+    "id": 1756817637315,
+    "product_id": 1756815570395,
+    "price": 771,
+    "store": "Amazon Poland",
+    "checked_at": "2025-09-02T12:53:57.314Z"
+  },
+  {
+    "id": 1756817689378,
+    "product_id": 1756815570395,
+    "price": 771,
+    "store": "Amazon Poland",
+    "checked_at": "2025-09-02T12:54:49.377Z"
+  },
+  {
+    "id": 1756817772962,
+    "product_id": 1756815570395,
+    "price": 771,
+    "store": "Amazon Poland",
+    "checked_at": "2025-09-02T12:56:12.961Z"
+  },
+  {
+    "id": 1756818850326,
+    "product_id": 1756815570395,
+    "price": 771,
+    "store": "Amazon Poland",
+    "checked_at": "2025-09-02T13:14:10.325Z"
+  },
+  {
+    "id": 1756819255914,
+    "product_id": 1756815570395,
+    "price": 771,
+    "store": "Amazon Poland",
+    "checked_at": "2025-09-02T13:20:55.913Z"
+  },
+  {
+    "id": 1756819301012,
+    "product_id": 1756815570395,
+    "price": 771,
+    "store": "Amazon Poland",
+    "checked_at": "2025-09-02T13:21:41.012Z"
+  },
+  {
+    "id": 1756819364684,
+    "product_id": 1756815570395,
+    "price": 771,
+    "store": "Amazon Poland",
+    "checked_at": "2025-09-02T13:22:44.684Z"
+  },
+  {
+    "id": 1756819368473,
+    "product_id": 1756815570395,
+    "price": 771,
+    "store": "Amazon Poland",
+    "checked_at": "2025-09-02T13:22:48.473Z"
+  },
+  {
+    "id": 1756819520805,
+    "product_id": 1756815570395,
+    "price": 771,
+    "store": "Amazon Poland",
+    "checked_at": "2025-09-02T13:25:20.804Z"
+  },
+  {
+    "id": 1756819536894,
+    "product_id": 1756815570395,
+    "price": 771,
+    "store": "Amazon Poland",
+    "checked_at": "2025-09-02T13:25:36.894Z"
+  },
+  {
+    "id": 1756819560276,
+    "product_id": 1756815570395,
+    "price": 771,
+    "store": "Amazon Poland",
+    "checked_at": "2025-09-02T13:26:00.275Z"
+  },
+  {
+    "id": 1756819566407,
+    "product_id": 1756815570395,
+    "price": 771,
+    "store": "Amazon Poland",
+    "checked_at": "2025-09-02T13:26:06.407Z"
+  },
+  {
+    "id": 1756819667716,
+    "product_id": 1756815570395,
+    "price": 771,
+    "store": "Amazon Poland",
+    "checked_at": "2025-09-02T13:27:47.715Z"
+  },
+  {
+    "id": 1756819741307,
+    "product_id": 1756815570395,
+    "price": 771,
+    "store": "Amazon Poland",
+    "checked_at": "2025-09-02T13:29:01.306Z"
+  },
+  {
+    "id": 1756819806752,
+    "product_id": 1756815570395,
+    "price": 771,
+    "store": "Amazon Poland",
+    "checked_at": "2025-09-02T13:30:06.751Z"
+  },
+  {
+    "id": 1756819898466,
+    "product_id": 1756815570395,
+    "price": 771,
+    "store": "Amazon Poland",
+    "checked_at": "2025-09-02T13:31:38.466Z"
+  },
+  {
+    "id": 1756820230576,
+    "product_id": 1756815570395,
+    "price": 771,
+    "store": "Amazon Poland",
+    "checked_at": "2025-09-02T13:37:10.575Z"
+  },
+  {
+    "id": 1756820261458,
+    "product_id": 1756815570395,
+    "price": 771,
+    "store": "Amazon Poland",
+    "checked_at": "2025-09-02T13:37:41.457Z"
+  },
+  {
+    "id": 1756820613432,
+    "product_id": 1756815570395,
+    "price": 771,
+    "store": "Amazon Poland",
+    "checked_at": "2025-09-02T13:43:33.432Z"
+  },
+  {
+    "id": 1756820720297,
+    "product_id": 1756815570395,
+    "price": 771,
+    "store": "Amazon Poland",
+    "checked_at": "2025-09-02T13:45:20.297Z"
+  },
+  {
+    "id": 1756820853585,
+    "product_id": 1756815570395,
+    "price": 771,
+    "store": "Amazon Poland",
+    "checked_at": "2025-09-02T13:47:33.584Z"
+  },
+  {
+    "id": 1756820855084,
+    "product_id": 1756820784726,
+    "price": 350,
+    "store": "Amazon Poland",
+    "checked_at": "2025-09-02T13:47:35.084Z"
+  },
+  {
+    "id": 1756820998777,
+    "product_id": 1756815570395,
+    "price": 771,
+    "store": "Amazon Poland",
+    "checked_at": "2025-09-02T13:49:58.777Z"
+  },
+  {
+    "id": 1756821000165,
+    "product_id": 1756820784726,
+    "price": 36.05,
+    "store": "Amazon Poland",
+    "checked_at": "2025-09-02T13:50:00.164Z"
+  },
+  {
+    "id": 1756821182020,
+    "product_id": 1756815570395,
+    "price": 771,
+    "store": "Amazon Poland",
+    "checked_at": "2025-09-02T13:53:02.019Z"
+  },
+  {
+    "id": 1756821183478,
+    "product_id": 1756820784726,
+    "price": 36.05,
+    "store": "Amazon Poland",
+    "checked_at": "2025-09-02T13:53:03.477Z"
+  },
+  {
+    "id": 1756821508943,
+    "product_id": 1756815570395,
+    "price": 771,
+    "store": "Amazon Poland",
+    "checked_at": "2025-09-02T13:58:28.943Z"
+  },
+  {
+    "id": 1756821510443,
+    "product_id": 1756820784726,
+    "price": 36.05,
+    "store": "Amazon Poland",
+    "checked_at": "2025-09-02T13:58:30.442Z"
+  },
+  {
+    "id": 1756822151780,
+    "product_id": 1756815570395,
+    "price": 771,
+    "store": "Amazon Poland",
+    "checked_at": "2025-09-02T14:09:11.780Z"
+  },
+  {
+    "id": 1756822153187,
+    "product_id": 1756820784726,
+    "price": 36.05,
+    "store": "Amazon Poland",
+    "checked_at": "2025-09-02T14:09:13.187Z"
+  },
+  {
+    "id": 1756822218740,
+    "product_id": 1756815570395,
+    "price": 771,
+    "store": "Amazon Poland",
+    "checked_at": "2025-09-02T14:10:18.740Z"
+  },
+  {
+    "id": 1756822219479,
+    "product_id": 1756820784726,
+    "price": 350,
+    "store": "Amazon Poland",
+    "checked_at": "2025-09-02T14:10:19.478Z"
+  },
+  {
+    "id": 1756822237564,
+    "product_id": 1756815570395,
+    "price": 771,
+    "store": "Amazon Poland",
+    "checked_at": "2025-09-02T14:10:37.563Z"
+  },
+  {
+    "id": 1756822238495,
+    "product_id": 1756822223739,
+    "price": 278,
+    "store": "Amazon Poland",
+    "checked_at": "2025-09-02T14:10:38.495Z"
+  },
+  {
+    "id": 1756822524860,
+    "product_id": 1756815570395,
+    "price": 771,
+    "store": "Amazon Poland",
+    "checked_at": "2025-09-02T14:15:24.859Z"
+  },
+  {
+    "id": 1756822525784,
+    "product_id": 1756822223739,
+    "price": 278,
+    "store": "Amazon Poland",
+    "checked_at": "2025-09-02T14:15:25.784Z"
+  }
+]

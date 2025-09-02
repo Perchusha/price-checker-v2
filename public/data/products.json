@@ -1,0 +1,30 @@
+[
+  {
+    "id": 1756815570395,
+    "name": "Audioengine A5+",
+    "target_price": 2000,
+    "current_price": 771,
+    "url": "",
+    "found_url": "https://www.amazon.pl/Audioengine-Przewodowe-glo%C5%9Bniki-p%C3%B3lkowe-sluchania/dp/B005OSR1C8/ref=sr_1_1?dib=eyJ2IjoiMSJ9.4hjZ1Jinut9boVCNJzpe9EseD3LbWlkQPCnJ6Q7ZffGbE65aBfbJb-5NRjdEsofHDHgmuA3XfF4sjaV_tKEN9I2CyQlffXAxyddoYIpY7Yji861ST5R54BXGhweUa6KnirqLk_bQ4cgo64qnTTP2qJYaV20etNNscKPsW-xyKuw4ny1cZSzipCcloyoM1nrQInu5jkxBiSu8hb--0ATVLnnRw5QQPJXIyz4bFzRKh9ODx5S7cZzlpGd4TilbdW1cdqhW7TaU0uhRGD6wmv1lYX9YhdbEZl2klzJ0yY4xUDQ.gQcss7AHsNzLGwKcOA8GeYWoSUmZlClsY1-fOVRzFHU&amp;dib_tag=se&amp;keywords=Audioengine+A5%2B&amp;qid=1756822524&amp;sr=8-1",
+    "last_checked": "2025-09-02T14:15:24.859Z",
+    "is_active": true,
+    "created_at": "2025-09-02T12:19:30.395Z",
+    "found_store": "Amazon Poland",
+    "found_store_url": "https://www.amazon.pl",
+    "is_checking": false
+  },
+  {
+    "id": 1756822223739,
+    "name": "Noctua NF-A12x25 G2 PWM Sx2-PP",
+    "target_price": 280,
+    "current_price": 278,
+    "url": "",
+    "found_url": "https://www.amazon.pl/Noctua-NF-A12x25-PWM-Sx2-PP-Dwuwentylatorowy/dp/B0FC67L17G/ref=sr_1_1?dib=eyJ2IjoiMSJ9.3jIOcRbiviOW_bO5x8M9seC-Moe93xptMr0z-3kNjIKSMFcKAcW9ZgwcVnb8aIg9d67OUhwcYbRrSjgz3ae_Rp2b5ig2OG5LPrqZSvF14HJAexPH-h7xuLqzZ1CYXy2uS-N77Lxn_xwUOwu7IIgpYMrIS_1lfS9uwwzAOAo1yGidZjpDUe7bHGoXDGNSyzBApJykA2ifMEPiR0aRveYnmneti0WReppemgIKtu10CGfPf7YuOvpOFgjBteLoRrg45FXq7PBtxD6amjyDqlOWSIe3p9uXBmEBNHl-tuxxAKQ.FQMH9j3w-lSAeUbzfFsOVpfE-_dcw4gCzTUzc4kNDeQ&amp;dib_tag=se&amp;keywords=Noctua+NF-A12x25+G2+PWM+Sx2-PP&amp;qid=1756822524&amp;sr=8-1",
+    "last_checked": "2025-09-02T14:15:25.784Z",
+    "is_active": true,
+    "is_checking": false,
+    "created_at": "2025-09-02T14:10:23.739Z",
+    "found_store": "Amazon Poland",
+    "found_store_url": "https://www.amazon.pl"
+  }
+]
