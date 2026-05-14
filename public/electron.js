@@ -8,46 +8,67 @@ const {
 } = require("electron");
 const path = require("path");
 const isDev = require("electron-is-dev");
-const { spawn } = require("child_process");
 
-// Импорт модуля для работы с ценами
 const PriceChecker = require("./price-checker.js");
-const priceChecker = new PriceChecker();
+const SettingsManager = require("./settings-manager.js");
+
+const priceChecker = new PriceChecker(app.getPath("userData"));
+const settingsManager = new SettingsManager(app.getPath("userData"));
 
 let mainWindow;
 let tray;
 
+const appIconPath = path.join(__dirname, "logo.png");
+const alertIconPath = path.join(__dirname, "logo-alert.png");
+
+function normalTrayIcon() {
+  return nativeImage.createFromPath(appIconPath).resize({ width: 16, height: 16 });
+}
+function alertTrayIcon() {
+  return nativeImage.createFromPath(alertIconPath).resize({ width: 16, height: 16 });
+}
+
+function resetTrayAlert() {
+  if (tray) {
+    tray.setImage(normalTrayIcon());
+    tray.setToolTip("Price Checker — Мониторинг цен");
+  }
+}
+
 function createWindow() {
-  // Создание окна браузера
   mainWindow = new BrowserWindow({
     width: 640,
-    height: 320,
+    height: 760,
     webPreferences: {
       nodeIntegration: true,
       contextIsolation: false,
       enableRemoteModule: true,
     },
-    icon: path.join(__dirname, "icon.png"),
+    icon: appIconPath,
     show: false,
     autoHideMenuBar: true,
     resizable: false,
   });
 
-  // Загрузка приложения
   const startUrl = isDev
     ? "http://localhost:3000"
     : `file://${path.join(__dirname, "../build/index.html")}`;
 
   mainWindow.loadURL(startUrl);
 
-  // Показать окно когда готово
   mainWindow.once("ready-to-show", () => {
-    mainWindow.show();
-    // Передаем ссылку на окно в PriceChecker для отправки событий
+    const settings = settingsManager.load();
+    if (!settings.startMinimized) {
+      mainWindow.show();
+    }
     priceChecker.setMainWindow(mainWindow);
   });
 
-  // Скрыть в трей при закрытии
+  // Reset tray alert when user opens the window
+  mainWindow.on("show", () => {
+    resetTrayAlert();
+  });
+
   mainWindow.on("close", (event) => {
     if (!app.isQuiting) {
       event.preventDefault();
@@ -61,11 +82,7 @@ function createWindow() {
 }
 
 function createTray() {
-  // Создание иконки для трея
-  const iconPath = path.join(__dirname, "icon.png");
-  const trayIcon = nativeImage.createFromPath(iconPath);
-
-  tray = new Tray(trayIcon);
+  tray = new Tray(normalTrayIcon());
 
   const contextMenu = Menu.buildFromTemplate([
     {
@@ -91,28 +108,55 @@ function createTray() {
     },
   ]);
 
-  tray.setToolTip("Price Checker - Мониторинг цен");
+  tray.setToolTip("Price Checker — Мониторинг цен");
   tray.setContextMenu(contextMenu);
 
-  // Двойной клик для показа окна
   tray.on("double-click", () => {
     mainWindow.show();
     mainWindow.focus();
   });
 }
 
+function setupAlertHandler() {
+  priceChecker.onAlert = ({ productName, currentPrice, targetPrice }) => {
+    // 1. Change tray icon
+    if (tray) {
+      tray.setImage(alertTrayIcon());
+      tray.setToolTip(`Price Checker — Найдена цена!\n${productName}: ${currentPrice.toFixed(2)} PLN`);
+    }
+
+    // 2. Balloon tip in tray (works even when Windows notifications are off)
+    if (tray) {
+      tray.displayBalloon({
+        title: "Price Checker — Найдена цена!",
+        content: `«${productName}»\n${currentPrice.toFixed(2)} PLN (цель: ${targetPrice.toFixed(2)} PLN)`,
+        iconType: "warning",
+        noSound: false,
+      });
+    }
+
+    // 3. Sound via renderer (appears in Windows volume mixer)
+    const settings = settingsManager.load();
+    if (settings.soundEnabled && mainWindow) {
+      mainWindow.webContents.send(
+        "play-alert-sound",
+        settings.selectedSound || ""
+      );
+    }
+  };
+}
+
 function startPriceChecker() {
-  // Инициализация и запуск мониторинга цен
   priceChecker.initDataDirectory();
+  setupAlertHandler();
   priceChecker.startMonitoring();
-  priceChecker.startTimer(); // Запускаем таймер
+  priceChecker.startTimer();
 }
 
 // IPC обработчики
 ipcMain.handle("get-products", async () => {
   try {
-    const products = await priceChecker.getProducts();
-    return products;
+    return await priceChecker.getProducts();
   } catch (error) {
     console.error("Ошибка при получении товаров:", error);
     return [];
@@ -121,11 +165,7 @@ ipcMain.handle("get-products", async () => {
 
 ipcMain.handle("add-product", async (event, product) => {
   try {
-    const result = await priceChecker.addProduct(
-      product.name,
-      product.targetPrice,
-      product.url
-    );
+    const result = await priceChecker.addProduct(product.name, product.targetPrice, product.url);
     return { success: true, id: result.id };
   } catch (error) {
     console.error("Ошибка при добавлении товара:", error);
@@ -135,8 +175,7 @@ ipcMain.handle("add-product", async (event, product) => {
 
 ipcMain.handle("delete-product", async (event, productId) => {
   try {
-    const result = await priceChecker.deleteProduct(productId);
-    return result;
+    return await priceChecker.deleteProduct(productId);
   } catch (error) {
     console.error("Ошибка при удалении товара:", error);
     return { success: false, error: error.message };
@@ -153,7 +192,16 @@ ipcMain.handle("check-prices-now", async () => {
   }
 });
 
-// Получение статуса таймера
+ipcMain.handle("check-product-price", async (event, productId) => {
+  try {
+    await priceChecker.checkProductById(productId);
+    return { success: true };
+  } catch (error) {
+    console.error("Ошибка при проверке товара:", error);
+    return { success: false, error: error.message };
+  }
+});
+
 ipcMain.handle("get-timer-status", async () => {
   try {
     return priceChecker.getTimerStatus();
@@ -163,7 +211,6 @@ ipcMain.handle("get-timer-status", async () => {
   }
 });
 
-// Перезапуск таймера
 ipcMain.handle("restart-timer", async () => {
   try {
     priceChecker.startTimer();
@@ -174,32 +221,56 @@ ipcMain.handle("restart-timer", async () => {
   }
 });
 
-// События приложения
+ipcMain.handle("get-settings", async () => {
+  try {
+    const settings = settingsManager.load();
+    const autostart = app.getLoginItemSettings().openAtLogin;
+    return { ...settings, autostart };
+  } catch (error) {
+    console.error("Ошибка при получении настроек:", error);
+    return { autostart: false, startMinimized: false, soundEnabled: true, selectedSound: "" };
+  }
+});
+
+ipcMain.handle("save-settings", async (event, settings) => {
+  try {
+    const saved = settingsManager.save(settings);
+    app.setLoginItemSettings({ openAtLogin: !!settings.autostart });
+    return { success: saved };
+  } catch (error) {
+    console.error("Ошибка при сохранении настроек:", error);
+    return { success: false, error: error.message };
+  }
+});
+
+ipcMain.handle("get-available-sounds", async () => {
+  try {
+    return settingsManager.getAvailableSounds();
+  } catch (error) {
+    console.error("Ошибка при получении звуков:", error);
+    return [];
+  }
+});
+
 app.whenReady().then(() => {
   createWindow();
   createTray();
   startPriceChecker();
 
   app.on("activate", () => {
-    if (BrowserWindow.getAllWindows().length === 0) {
-      createWindow();
-    }
+    if (BrowserWindow.getAllWindows().length === 0) createWindow();
   });
 });
 
 app.on("window-all-closed", () => {
-  if (process.platform !== "darwin") {
-    app.quit();
-  }
+  if (process.platform !== "darwin") app.quit();
 });
 
 app.on("before-quit", () => {
   app.isQuiting = true;
 });
 
-// Предотвращение множественных экземпляров
 const gotTheLock = app.requestSingleInstanceLock();
-
 if (!gotTheLock) {
   app.quit();
 } else {

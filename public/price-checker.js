@@ -1,121 +1,74 @@
 const fs = require("fs");
-const http = require("http");
 const https = require("https");
+const { spawn } = require("child_process");
 const notifier = require("node-notifier");
 const path = require("path");
+const isDev = require("electron-is-dev");
+
+const CHECK_INTERVAL_MS = 60 * 60 * 1000;
+const PRODUCT_DELAY_MS = 5000;
+const SOURCE_DELAY_MS = 3000;
+const REQUEST_TIMEOUT_MS = 15000;
+const RETRY_DELAY_MS = 4000;
+const MAX_RETRIES = 1;
+const BLOCKED_STATUS_CODES = new Set([401, 403, 429]);
+const RETRYABLE_STATUS_CODES = new Set([408, 500, 502, 503, 504]);
+
+// In production the scraper lives in app.asar.unpacked (not the read-only .asar archive).
+const SCRAPER_PATH = isDev
+  ? path.join(__dirname, "scraper", "scraper.py")
+  : path.join(process.resourcesPath, "app.asar.unpacked", "public", "scraper", "scraper.py");
 
 class PriceChecker {
-  constructor() {
-    this.dataPath = path.join(__dirname, "data");
+  constructor(userDataPath = null) {
+    // In production use the writable userData folder; in dev use local data/
+    this.dataPath = userDataPath
+      ? path.join(userDataPath, "data")
+      : path.join(__dirname, "data");
     this.productsFile = path.join(this.dataPath, "products.json");
     this.priceHistoryFile = path.join(this.dataPath, "price_history.json");
-    this.mainWindow = null; // Will be set from electron.js
+    this.logFile = this.dataPath ? path.join(this.dataPath, "scraper.log") : null;
+    this.mainWindow = null;
+    this.onAlert = null; // callback set by electron.js for tray/sound alerts
     this.timerInterval = null;
     this.nextCheckTime = null;
     this.timeUntilNextCheck = 0;
+    this.monitoringStarted = false;
+    this.isCheckingAll = false;
   }
 
   setMainWindow(window) {
     this.mainWindow = window;
   }
 
-  // Send events to UI
   emit(event, data) {
     if (this.mainWindow && this.mainWindow.webContents) {
       this.mainWindow.webContents.send(event, data);
     }
   }
 
-  // Google Shopping API (free)
-  async searchGoogleShopping(productName, targetPrice) {
-    return new Promise((resolve) => {
-      // Use free Google Shopping API
-      const options = {
-        hostname: "google-shopping-data.p.rapidapi.com",
-        path: `/shopping/search?query=${encodeURIComponent(
-          productName
-        )}&country=PL&language=pl`,
-        method: "GET",
-        headers: {
-          "X-RapidAPI-Key": "YOUR_FREE_API_KEY", // Get at rapidapi.com
-          "X-RapidAPI-Host": "google-shopping-data.p.rapidapi.com",
-        },
-      };
+  // ─── Timer ───────────────────────────────────────────────────────────────
 
-      const req = https.request(options, (res) => {
-        let data = "";
-        res.on("data", (chunk) => {
-          data += chunk;
-        });
-        res.on("end", () => {
-          try {
-            const result = JSON.parse(data);
-            if (result.shopping_results && result.shopping_results.length > 0) {
-              const firstResult = result.shopping_results[0];
-              const price = parseFloat(
-                firstResult.price.replace(/[^\d.,]/g, "").replace(",", ".")
-              );
-              if (price && (!targetPrice || price <= targetPrice)) {
-                resolve({
-                  price: price,
-                  url: firstResult.link,
-                  store: firstResult.source,
-                  storeUrl: firstResult.source,
-                });
-                return;
-              }
-            }
-            resolve(null);
-          } catch (error) {
-            console.log(`Google Shopping API parsing error: ${error.message}`);
-            resolve(null);
-          }
-        });
-      });
-
-      req.on("error", (error) => {
-        console.log(`Google Shopping API error: ${error.message}`);
-        resolve(null);
-      });
-
-      req.setTimeout(5000, () => {
-        req.destroy();
-        resolve(null);
-      });
-
-      req.end();
-    });
-  }
-
-  // Timer management
   startTimer() {
-    if (this.timerInterval) {
-      clearInterval(this.timerInterval);
-    }
+    if (this.timerInterval) clearInterval(this.timerInterval);
 
-    // Set next check time (every hour)
     const now = new Date();
-    this.nextCheckTime = new Date(now.getTime() + 60 * 60 * 1000);
-    this.timeUntilNextCheck = 60 * 60 * 1000;
+    this.nextCheckTime = new Date(now.getTime() + CHECK_INTERVAL_MS);
+    this.timeUntilNextCheck = CHECK_INTERVAL_MS;
 
-    // Send initial time to UI
     this.emit("timer-updated", {
       nextCheckTime: this.nextCheckTime.toISOString(),
       timeUntilNextCheck: this.timeUntilNextCheck,
     });
 
-    // Update timer every second
     this.timerInterval = setInterval(() => {
       this.timeUntilNextCheck -= 1000;
 
       if (this.timeUntilNextCheck <= 0) {
-        // Time's up, start check and reset timer
-        this.checkAllPrices();
-        this.startTimer(); // Restart timer
+        this.runScheduledCheck();
         return;
       }
 
-      // Send update to UI
       this.emit("timer-updated", {
         nextCheckTime: this.nextCheckTime.toISOString(),
         timeUntilNextCheck: this.timeUntilNextCheck,
@@ -132,24 +85,30 @@ class PriceChecker {
 
   getTimerStatus() {
     return {
-      nextCheckTime: this.nextCheckTime
-        ? this.nextCheckTime.toISOString()
-        : null,
+      nextCheckTime: this.nextCheckTime ? this.nextCheckTime.toISOString() : null,
       timeUntilNextCheck: this.timeUntilNextCheck,
     };
   }
 
+  async runScheduledCheck() {
+    this.stopTimer();
+    await this.checkAllPrices();
+    this.startTimer();
+  }
+
+  delay(ms) {
+    return new Promise((resolve) => setTimeout(resolve, ms));
+  }
+
+  // ─── Data persistence ────────────────────────────────────────────────────
+
   initDataDirectory() {
-    // Create data directory
     if (!fs.existsSync(this.dataPath)) {
       fs.mkdirSync(this.dataPath, { recursive: true });
     }
-
-    // Create files if they don't exist
     if (!fs.existsSync(this.productsFile)) {
       fs.writeFileSync(this.productsFile, JSON.stringify([]));
     }
-
     if (!fs.existsSync(this.priceHistoryFile)) {
       fs.writeFileSync(this.priceHistoryFile, JSON.stringify([]));
     }
@@ -160,7 +119,6 @@ class PriceChecker {
       const data = fs.readFileSync(this.productsFile, "utf8");
       const products = JSON.parse(data);
 
-      // Migration: add is_checking field for existing products
       let needsUpdate = false;
       products.forEach((product) => {
         if (product.is_checking === undefined) {
@@ -168,13 +126,7 @@ class PriceChecker {
           needsUpdate = true;
         }
       });
-
-      if (needsUpdate) {
-        this.saveProducts(products);
-        console.log(
-          "✅ Migration: added is_checking field for existing products"
-        );
-      }
+      if (needsUpdate) this.saveProducts(products);
 
       return products;
     } catch (error) {
@@ -203,577 +155,395 @@ class PriceChecker {
 
   savePriceHistory(priceHistory) {
     try {
-      fs.writeFileSync(
-        this.priceHistoryFile,
-        JSON.stringify(priceHistory, null, 2)
-      );
+      fs.writeFileSync(this.priceHistoryFile, JSON.stringify(priceHistory, null, 2));
     } catch (error) {
       console.error("Error saving price history:", error);
     }
   }
 
-  async scrapePrice(productName, url = null) {
-    return new Promise((resolve) => {
+  // ─── Camoufox scraping ───────────────────────────────────────────────────
+
+  /**
+   * Build a list of search-page URLs for Polish stores.
+   */
+  buildSearchUrls(productName) {
+    const q = encodeURIComponent(productName);
+    return [
+      { store: "Ceneo",        url: `https://www.ceneo.pl/;szukaj-${q}`,                          is_search: true },
+      { store: "Allegro",      url: `https://allegro.pl/listing?string=${q}`,                      is_search: true },
+      { store: "x-kom",        url: `https://www.x-kom.pl/szukaj?q=${q}`,                          is_search: true },
+      { store: "Media Expert", url: `https://www.mediaexpert.pl/search?query=${q}`,                is_search: true },
+      { store: "RTV Euro AGD", url: `https://www.euro.com.pl/search?query=${q}`,                   is_search: true },
+      { store: "Amazon.pl",    url: `https://www.amazon.pl/s?k=${q}`,                              is_search: true },
+      { store: "Morele",       url: `https://www.morele.net/wyszukiwarka/?q=${q}`,                 is_search: true },
+    ];
+  }
+
+  appendLog(msg) {
+    if (!this.logFile) return;
+    const line = `[${new Date().toISOString()}] ${msg}\n`;
+    try { fs.appendFileSync(this.logFile, line); } catch {}
+    console.log(msg);
+  }
+
+  findPython() {
+    const { execFileSync } = require("child_process");
+    // On Windows try where.exe to resolve the real path (handles pyenv shims)
+    if (process.platform === "win32") {
       try {
-        // If there's a specific URL, use it
-        if (url && url.trim() !== "") {
-          this.scrapeFromUrl(url, productName).then(resolve);
-          return;
-        }
+        const out = execFileSync("where.exe", ["python"], { encoding: "utf8", timeout: 3000 });
+        const found = out.trim().split("\n")[0].trim();
+        if (found) return found;
+      } catch {}
+    }
+    return process.platform === "win32" ? "python" : "python3";
+  }
 
-        // Try different sources for price search
-        const searchSources = [
-          {
-            name: "x-kom",
-            url: `https://www.x-kom.pl/szukaj?q=${encodeURIComponent(
-              productName
-            )}`,
-            patterns: [
-              /(\d+[\.,]\d+)\s*(zł|PLN)/gi,
-              /(\d+[\.,]\d+)\s*zł/gi,
-              /price[^>]*>.*?(\d+[\.,]\d+)\s*zł/gi,
-              /cena[^>]*>.*?(\d+[\.,]\d+)\s*zł/gi,
-            ],
-            storeUrl: "https://www.x-kom.pl",
-          },
-          {
-            name: "Allegro",
-            url: `https://allegro.pl/listing?string=${encodeURIComponent(
-              productName
-            )}`,
-            patterns: [
-              /(\d+[\.,]\d+)\s*(zł|PLN)/gi,
-              /(\d+[\.,]\d+)\s*zł/gi,
-              /price[^>]*>.*?(\d+[\.,]\d+)\s*zł/gi,
-              /cena[^>]*>.*?(\d+[\.,]\d+)\s*zł/gi,
-            ],
-            storeUrl: "https://allegro.pl",
-          },
-          {
-            name: "Amazon Poland",
-            url: `https://www.amazon.pl/s?k=${encodeURIComponent(productName)}`,
-            patterns: [
-              /(\d+[\.,]\d+)\s*(zł|PLN)/gi,
-              /(\d+[\.,]\d+)\s*zł/gi,
-              /price[^>]*>.*?(\d+[\.,]\d+)\s*zł/gi,
-              /cena[^>]*>.*?(\d+[\.,]\d+)\s*zł/gi,
-            ],
-            storeUrl: "https://www.amazon.pl",
-          },
-          {
-            name: "Ceneo",
-            url: `https://www.ceneo.pl/;szukaj-${encodeURIComponent(
-              productName
-            )}`,
-            patterns: [
-              /(\d+[\.,]\d+)\s*(zł|PLN)/gi,
-              /(\d+[\.,]\d+)\s*zł/gi,
-              /price[^>]*>.*?(\d+[\.,]\d+)\s*zł/gi,
-              /cena[^>]*>.*?(\d+[\.,]\d+)\s*zł/gi,
-            ],
-            storeUrl: "https://www.ceneo.pl",
-          },
-          {
-            name: "Media Expert",
-            url: `https://www.mediaexpert.pl/search?query=${encodeURIComponent(
-              productName
-            )}`,
-            patterns: [
-              /(\d+[\.,]\d+)\s*(zł|PLN)/gi,
-              /(\d+[\.,]\d+)\s*zł/gi,
-              /price[^>]*>.*?(\d+[\.,]\d+)\s*zł/gi,
-              /cena[^>]*>.*?(\d+[\.,]\d+)\s*zł/gi,
-            ],
-            storeUrl: "https://www.mediaexpert.pl",
-          },
-          {
-            name: "RTV Euro AGD",
-            url: `https://www.euro.com.pl/search?query=${encodeURIComponent(
-              productName
-            )}`,
-            patterns: [/(\d+[\.,]\d+)\s*(zł|PLN)/gi],
-            storeUrl: "https://www.euro.com.pl",
-          },
-        ];
-
-        // Collect prices from all sources and select the best
-        this.collectAllPrices(productName, searchSources, null, resolve);
-      } catch (error) {
-        console.error(
-          `Error scraping price for ${productName}:`,
-          error.message
-        );
-        resolve({ price: null, url: null });
+  /**
+   * Call the Python/Camoufox scraper subprocess and return its parsed output.
+   * Returns { results: [...] } on success or { results: [], error: "..." } on failure.
+   */
+  scrapeWithCamoufox(urlInfos) {
+    return new Promise((resolve) => {
+      if (!fs.existsSync(SCRAPER_PATH)) {
+        this.appendLog(`[camoufox] scraper not found at ${SCRAPER_PATH}`);
+        resolve({ results: [] });
+        return;
       }
+
+      const pythonCmd = this.findPython();
+      this.appendLog(`[camoufox] python: ${pythonCmd}`);
+      this.appendLog(`[camoufox] scraper: ${SCRAPER_PATH}`);
+
+      const input = JSON.stringify({ urls: urlInfos });
+
+      let proc;
+      try {
+        proc = spawn(pythonCmd, [SCRAPER_PATH], {
+          env: { ...process.env, PYTHONIOENCODING: "utf-8", PYTHONUTF8: "1" },
+          shell: process.platform === "win32", // pyenv shims are .cmd — need cmd.exe to resolve them
+        });
+      } catch (err) {
+        this.appendLog(`[camoufox] failed to spawn Python: ${err.message}`);
+        resolve({ results: [] });
+        return;
+      }
+
+      let stdout = "";
+      let stderr = "";
+      let timedOut = false;
+
+      // Hard timeout: 3 min per full check run
+      const timer = setTimeout(() => {
+        timedOut = true;
+        proc.kill();
+        this.appendLog("[camoufox] subprocess timed out");
+        resolve({ results: [] });
+      }, 180_000);
+
+      proc.stdout.on("data", (chunk) => { stdout += chunk; });
+      proc.stderr.on("data", (chunk) => {
+        stderr += chunk;
+        process.stdout.write(chunk);
+      });
+
+      proc.on("close", (code) => {
+        if (timedOut) return;
+        clearTimeout(timer);
+        this.appendLog(`[camoufox] exit code: ${code}`);
+        if (stderr) this.appendLog(`[camoufox] stderr: ${stderr.slice(0, 500)}`);
+
+        try {
+          const result = JSON.parse(stdout.trim());
+          if (result.error) {
+            this.appendLog(`[camoufox] error: ${result.error}`);
+          }
+          this.appendLog(`[camoufox] results: ${result.results?.length ?? 0} prices found`);
+          resolve({ results: result.results || [] });
+        } catch (e) {
+          this.appendLog(`[camoufox] parse error: ${e.message} | stdout: ${stdout.slice(0, 300)}`);
+          resolve({ results: [] });
+        }
+      });
+
+      proc.on("error", (err) => {
+        clearTimeout(timer);
+        if (!timedOut) {
+          this.appendLog(`[camoufox] spawn error: ${err.message}`);
+          resolve({ results: [] });
+        }
+      });
+
+      proc.stdin.write(input);
+      proc.stdin.end();
     });
   }
 
+  /**
+   * Primary entry point: scrape a product price.
+   *   1. Tries Camoufox (real browser, anti-detection).
+   *   2. Falls back to plain HTTPS requests + regex when Python is unavailable.
+   */
   async scrapePriceWithTarget(productName, url = null, targetPrice = null) {
-    return new Promise((resolve) => {
-      try {
-        // If there's a specific URL, use it
-        if (url && url.trim() !== "") {
-          this.scrapeFromUrl(url, productName).then(resolve);
-          return;
+    // ── Camoufox path ──────────────────────────────────────────────────────
+    const urlInfos = (url && url.trim())
+      ? [{ store: "Direct", url: url.trim(), is_search: false }]
+      : this.buildSearchUrls(productName);
+
+    console.log(`🦊 Camoufox: checking ${productName} via ${urlInfos.length} source(s)...`);
+    const camoufoxResult = await this.scrapeWithCamoufox(urlInfos);
+
+    if (camoufoxResult.results && camoufoxResult.results.length > 0) {
+      let results = camoufoxResult.results;
+
+      if (targetPrice) {
+        const below = results.filter((r) => r.price <= targetPrice);
+        if (below.length > 0) {
+          results = below;
+        } else {
+          // All prices found but none below target — return cheapest anyway so
+          // the user can see the current market price.
+          console.log(`⚠️  No results below target (${targetPrice} PLN). Returning cheapest.`);
         }
-
-        // Try different sources for price search
-        const searchSources = [
-          {
-            name: "x-kom",
-            url: `https://www.x-kom.pl/szukaj?q=${encodeURIComponent(
-              productName
-            )}`,
-            patterns: [
-              /(\d+[\.,]\d+)\s*(zł|PLN)/gi,
-              /(\d+[\.,]\d+)\s*zł/gi,
-              /price[^>]*>.*?(\d+[\.,]\d+)\s*zł/gi,
-              /cena[^>]*>.*?(\d+[\.,]\d+)\s*zł/gi,
-            ],
-            storeUrl: "https://www.x-kom.pl",
-          },
-          {
-            name: "Allegro",
-            url: `https://allegro.pl/listing?string=${encodeURIComponent(
-              productName
-            )}`,
-            patterns: [
-              /(\d+[\.,]\d+)\s*(zł|PLN)/gi,
-              /(\d+[\.,]\d+)\s*zł/gi,
-              /price[^>]*>.*?(\d+[\.,]\d+)\s*zł/gi,
-              /cena[^>]*>.*?(\d+[\.,]\d+)\s*zł/gi,
-            ],
-            storeUrl: "https://allegro.pl",
-          },
-          {
-            name: "Amazon Poland",
-            url: `https://www.amazon.pl/s?k=${encodeURIComponent(productName)}`,
-            patterns: [
-              /(\d+[\.,]\d+)\s*(zł|PLN)/gi,
-              /(\d+[\.,]\d+)\s*zł/gi,
-              /price[^>]*>.*?(\d+[\.,]\d+)\s*zł/gi,
-              /cena[^>]*>.*?(\d+[\.,]\d+)\s*zł/gi,
-            ],
-            storeUrl: "https://www.amazon.pl",
-          },
-          {
-            name: "Ceneo",
-            url: `https://www.ceneo.pl/;szukaj-${encodeURIComponent(
-              productName
-            )}`,
-            patterns: [
-              /(\d+[\.,]\d+)\s*(zł|PLN)/gi,
-              /(\d+[\.,]\d+)\s*zł/gi,
-              /price[^>]*>.*?(\d+[\.,]\d+)\s*zł/gi,
-              /cena[^>]*>.*?(\d+[\.,]\d+)\s*zł/gi,
-            ],
-            storeUrl: "https://www.ceneo.pl",
-          },
-          {
-            name: "Media Expert",
-            url: `https://www.mediaexpert.pl/search?query=${encodeURIComponent(
-              productName
-            )}`,
-            patterns: [
-              /(\d+[\.,]\d+)\s*(zł|PLN)/gi,
-              /(\d+[\.,]\d+)\s*zł/gi,
-              /price[^>]*>.*?(\d+[\.,]\d+)\s*zł/gi,
-              /cena[^>]*>.*?(\d+[\.,]\d+)\s*zł/gi,
-            ],
-            storeUrl: "https://www.mediaexpert.pl",
-          },
-          {
-            name: "RTV Euro AGD",
-            url: `https://www.euro.com.pl/search?query=${encodeURIComponent(
-              productName
-            )}`,
-            patterns: [/(\d+[\.,]\d+)\s*(zł|PLN)/gi],
-            storeUrl: "https://www.euro.com.pl",
-          },
-        ];
-
-        // Collect prices from all sources and select the best
-        this.collectAllPrices(productName, searchSources, targetPrice, resolve);
-      } catch (error) {
-        console.error(
-          `Error scraping price for ${productName}:`,
-          error.message
-        );
-        resolve({ price: null, url: null });
       }
-    });
-  }
 
-  async collectAllPrices(productName, sources, targetPrice, resolve) {
-    console.log(`🔍 Collecting prices from all stores for ${productName}...`);
-
-    const allPrices = [];
-    let completedRequests = 0;
-
-    // First try Google Shopping API (free)
-    try {
-      const apiResult = await this.searchGoogleShopping(
-        productName,
-        targetPrice
-      );
-      if (apiResult && apiResult.price) {
-        allPrices.push(apiResult);
-        console.log(
-          `🎯 Google Shopping API: found price ${apiResult.price} PLN`
-        );
-      }
-    } catch (error) {
-      console.log(`❌ Google Shopping API unavailable: ${error.message}`);
+      results.sort((a, b) => a.price - b.price);
+      const best = results[0];
+      console.log(`🏆 Best: ${best.price} PLN at ${best.store}`);
+      return best;
     }
 
-    // Run requests to all sources in parallel
-    sources.forEach((source, index) => {
-      this.scrapeFromSource(productName, source)
-        .then((result) => {
-          if (result && result.price) {
-            allPrices.push({
-              price: result.price,
-              url: result.url,
-              store: source.name,
-              storeUrl: source.storeUrl,
-            });
-            console.log(`✅ ${source.name}: ${result.price} PLN`);
-          } else {
-            console.log(`❌ ${source.name}: price not found`);
-          }
+    // ── HTTP fallback ──────────────────────────────────────────────────────
+    console.log("⚠️  Camoufox returned no results — falling back to HTTP scraping.");
 
-          completedRequests++;
+    if (url && url.trim()) {
+      return this.scrapeFromUrl(url.trim(), productName);
+    }
 
-          // When all requests are complete, select the best price
-          if (completedRequests === sources.length) {
-            if (allPrices.length > 0) {
-              // Filter prices - show only those BELOW target price
-              let validPrices = allPrices;
-              if (targetPrice) {
-                validPrices = allPrices.filter(
-                  (price) => price.price <= targetPrice
-                );
-                console.log(`🎯 Target price: ${targetPrice} PLN`);
-                console.log(
-                  `📊 Found ${allPrices.length} prices, ${validPrices.length} below target`
-                );
-              }
-
-              if (validPrices.length > 0) {
-                // Sort by price (lowest to highest)
-                validPrices.sort((a, b) => a.price - b.price);
-                const bestPrice = validPrices[0];
-
-                console.log(
-                  `🏆 Best price: ${bestPrice.price} PLN at ${bestPrice.store}`
-                );
-                console.log(`🔗 Link: ${bestPrice.url}`);
-
-                resolve({
-                  price: bestPrice.price,
-                  url: bestPrice.url,
-                  store: bestPrice.store,
-                  storeUrl: bestPrice.storeUrl,
-                });
-              } else {
-                // If all prices are above target, don't show them
-                console.log(
-                  `❌ All found prices are above target (${targetPrice} PLN) for ${productName}`
-                );
-                resolve({
-                  price: null,
-                  url: null,
-                  store: null,
-                  storeUrl: null,
-                });
-              }
-            } else {
-              // If no prices found, return null
-              console.log(`❌ No prices found for ${productName}`);
-              resolve({
-                price: null,
-                url: null,
-                store: null,
-                storeUrl: null,
-              });
-            }
-          }
-        })
-        .catch((error) => {
-          console.error(`Error requesting ${source.name}:`, error.message);
-          completedRequests++;
-
-          if (completedRequests === sources.length) {
-            if (allPrices.length > 0) {
-              allPrices.sort((a, b) => a.price - b.price);
-              const bestPrice = allPrices[0];
-              resolve({
-                price: bestPrice.price,
-                url: bestPrice.url,
-                store: bestPrice.store,
-                storeUrl: bestPrice.storeUrl,
-              });
-            } else {
-              const demoPrice = Math.floor(Math.random() * 200) + 300;
-              console.log(`🎲 Demo price for ${productName}: ${demoPrice} PLN`);
-              resolve({
-                price: demoPrice,
-                url:
-                  "https://www.google.com/search?q=" +
-                  encodeURIComponent(productName),
-                store: "Demo",
-                storeUrl: "https://www.google.com",
-              });
-            }
-          }
-        });
+    return new Promise((resolve) => {
+      this.collectAllPricesHTTP(productName, targetPrice, resolve);
     });
   }
 
-  async scrapeFromSource(productName, source) {
-    return new Promise((resolve) => {
-      const options = {
-        headers: {
-          "User-Agent":
-            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-          Accept:
-            "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
-          "Accept-Language": "pl-PL,pl;q=0.9,en;q=0.8",
-        },
-        timeout: 8000,
-      };
+  // ─── HTTP fallback scraping ──────────────────────────────────────────────
 
-      const request = https.get(source.url, options, (response) => {
-        // Skip redirects
-        if (response.statusCode === 302 || response.statusCode === 301) {
-          resolve(null);
+  createRequestOptions(timeout = REQUEST_TIMEOUT_MS) {
+    return {
+      headers: {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+        Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
+        "Accept-Language": "pl-PL,pl;q=0.9,en;q=0.8",
+      },
+      timeout,
+    };
+  }
+
+  requestHtml(url, timeout = REQUEST_TIMEOUT_MS, attempt = 0) {
+    return new Promise((resolve) => {
+      const request = https.get(url, this.createRequestOptions(timeout), (response) => {
+        const { statusCode } = response;
+        let data = "";
+
+        if (statusCode >= 300 && statusCode < 400) {
+          response.resume();
+          resolve({ data: null, statusCode, blocked: false });
+          return;
+        }
+
+        if (BLOCKED_STATUS_CODES.has(statusCode)) {
+          response.resume();
+          resolve({ data: null, statusCode, blocked: true });
+          return;
+        }
+
+        response.on("data", (chunk) => { data += chunk; });
+
+        response.on("end", async () => {
+          if (RETRYABLE_STATUS_CODES.has(statusCode) && attempt < MAX_RETRIES) {
+            await this.delay(RETRY_DELAY_MS * (attempt + 1));
+            resolve(await this.requestHtml(url, timeout, attempt + 1));
+            return;
+          }
+          resolve({ data, statusCode, blocked: false });
+        });
+      });
+
+      request.on("error", async () => {
+        if (attempt < MAX_RETRIES) {
+          await this.delay(RETRY_DELAY_MS * (attempt + 1));
+          resolve(await this.requestHtml(url, timeout, attempt + 1));
+          return;
+        }
+        resolve({ data: null, statusCode: null, blocked: false });
+      });
+
+      request.on("timeout", () => {
+        request.destroy();
+        resolve({ data: null, statusCode: null, blocked: false });
+      });
+    });
+  }
+
+  async collectAllPricesHTTP(productName, targetPrice, resolve) {
+    console.log(`🔍 HTTP fallback: collecting prices for ${productName}...`);
+
+    const sources = [
+      {
+        name: "Ceneo",
+        url: `https://www.ceneo.pl/;szukaj-${encodeURIComponent(productName)}`,
+        storeUrl: "https://www.ceneo.pl",
+      },
+      {
+        name: "Allegro",
+        url: `https://allegro.pl/listing?string=${encodeURIComponent(productName)}`,
+        storeUrl: "https://allegro.pl",
+      },
+      {
+        name: "x-kom",
+        url: `https://www.x-kom.pl/szukaj?q=${encodeURIComponent(productName)}`,
+        storeUrl: "https://www.x-kom.pl",
+      },
+      {
+        name: "Media Expert",
+        url: `https://www.mediaexpert.pl/search?query=${encodeURIComponent(productName)}`,
+        storeUrl: "https://www.mediaexpert.pl",
+      },
+      {
+        name: "RTV Euro AGD",
+        url: `https://www.euro.com.pl/search?query=${encodeURIComponent(productName)}`,
+        storeUrl: "https://www.euro.com.pl",
+      },
+    ];
+
+    // Shared price regex for Polish stores
+    const pricePatterns = [
+      /(\d{1,5}(?:[  ]\d{3})*[\.,]\d{2})\s*(?:z[łŁ]|PLN)/gi,
+      /(\d+[\.,]\d{2})\s*z[łl]/gi,
+    ];
+
+    const allPrices = [];
+
+    for (const source of sources) {
+      try {
+        await this.delay(SOURCE_DELAY_MS);
+        const { data, blocked } = await this.requestHtml(source.url, 8000);
+
+        if (blocked || !data || data.length < 500) {
+          console.log(`⛔ ${source.name}: blocked or empty response`);
+          continue;
+        }
+
+        let foundPrice = null;
+        for (const pattern of pricePatterns) {
+          const matches = data.match(pattern);
+          if (matches) {
+            for (const match of matches) {
+              const m = match.match(/(\d+[\.,]\d{2})/);
+              if (m) {
+                const price = parseFloat(m[1].replace(",", "."));
+                if (price >= 10 && price <= 50_000) {
+                  foundPrice = price;
+                  break;
+                }
+              }
+            }
+            if (foundPrice) break;
+          }
+        }
+
+        if (foundPrice) {
+          console.log(`✅ ${source.name}: ${foundPrice} PLN`);
+          allPrices.push({ price: foundPrice, url: source.url, store: source.name, storeUrl: source.storeUrl });
+        } else {
+          console.log(`❌ ${source.name}: price not found`);
+        }
+      } catch (err) {
+        console.error(`Error requesting ${source.name}:`, err.message);
+      }
+    }
+
+    if (allPrices.length === 0) {
+      resolve({ price: null, url: null, store: null, storeUrl: null });
+      return;
+    }
+
+    let validPrices = allPrices;
+    if (targetPrice) {
+      const below = allPrices.filter((p) => p.price <= targetPrice);
+      if (below.length > 0) validPrices = below;
+    }
+
+    validPrices.sort((a, b) => a.price - b.price);
+    const best = validPrices[0];
+    console.log(`🏆 HTTP best: ${best.price} PLN at ${best.store}`);
+    resolve(best);
+  }
+
+  async scrapeFromUrl(url, productName) {
+    return new Promise((resolve) => {
+      const request = https.get(url, this.createRequestOptions(REQUEST_TIMEOUT_MS), (response) => {
+        if (BLOCKED_STATUS_CODES.has(response.statusCode)) {
+          response.resume();
+          console.log(`${productName}: source unavailable (${response.statusCode})`);
+          resolve({ price: null, url });
           return;
         }
 
         let data = "";
-
-        response.on("data", (chunk) => {
-          data += chunk;
-        });
-
+        response.on("data", (chunk) => { data += chunk; });
         response.on("end", () => {
           try {
+            const patterns = [
+              /(\d{1,5}(?:[  ]\d{3})*[\.,]\d{2})\s*(?:z[łŁ]|PLN)/gi,
+              /(\d+[\.,]\d{2})\s*z[łl]/gi,
+            ];
             let foundPrice = null;
-
-            // Check if we got real data
-            if (data.length < 1000) {
-              resolve(null);
-              return;
-            }
-
-            // Search for prices using source patterns
-            const pricePatterns = source.patterns;
-            console.log(
-              `🔍 ${source.name}: Searching prices with ${pricePatterns.length} patterns...`
-            );
-
-            for (const pattern of pricePatterns) {
-              const matches = data.match(pattern);
+            for (const p of patterns) {
+              const matches = data.match(p);
               if (matches) {
-                console.log(
-                  `📊 ${source.name}: Found ${matches.length} pattern matches`
-                );
                 for (const match of matches) {
-                  const priceMatch = match.match(/(\d+[\.,]\d+)/);
-                  if (priceMatch) {
-                    const price = parseFloat(priceMatch[1].replace(",", "."));
-                    console.log(
-                      `💰 ${source.name}: Checking price ${price} PLN`
-                    );
-                    if (price >= 10 && price <= 10000) {
-                      foundPrice = price;
-                      console.log(
-                        `✅ ${source.name}: Valid price found: ${price} PLN`
-                      );
-                      break;
-                    }
+                  const m = match.match(/(\d+[\.,]\d{2})/);
+                  if (m) {
+                    const price = parseFloat(m[1].replace(",", "."));
+                    if (price >= 10 && price <= 50_000) { foundPrice = price; break; }
                   }
                 }
                 if (foundPrice) break;
               }
             }
-
-            if (foundPrice) {
-              // Try to find link to specific product
-              let productUrl = source.url; // Default to general link
-
-              // Patterns for finding product links
-              const linkPatterns = [
-                /href="([^"]*\/[^"]*\/[^"]*)"[^>]*>.*?(\d+[\.,]\d+)\s*zł/gi,
-                /href="([^"]*\/product[^"]*)"[^>]*>.*?(\d+[\.,]\d+)\s*zł/gi,
-                /href="([^"]*\/[^"]*)"[^>]*>.*?(\d+[\.,]\d+)\s*zł/gi,
-                /<a[^>]*href="([^"]*)"[^>]*>.*?(\d+[\.,]\d+)\s*zł/gi,
-              ];
-
-              for (const pattern of linkPatterns) {
-                const matches = [...data.matchAll(pattern)];
-                for (const match of matches) {
-                  if (match[1] && match[2]) {
-                    const price = parseFloat(match[2].replace(",", "."));
-                    if (Math.abs(price - foundPrice) < 0.01) {
-                      // Price matches
-                      productUrl = match[1].startsWith("http")
-                        ? match[1]
-                        : match[1].startsWith("/")
-                        ? source.storeUrl + match[1]
-                        : source.storeUrl + "/" + match[1];
-                      console.log(`🔗 Found product link: ${productUrl}`);
-                      break;
-                    }
-                  }
-                }
-                if (productUrl !== source.url) break;
-              }
-
-              resolve({ price: foundPrice, url: productUrl });
-            } else {
-              resolve(null);
-            }
-          } catch (error) {
-            resolve(null);
+            resolve({ price: foundPrice, url });
+          } catch {
+            resolve({ price: null, url });
           }
         });
       });
 
-      request.on("error", (error) => {
-        resolve(null);
-      });
-
-      request.on("timeout", () => {
-        request.destroy();
-        resolve(null);
-      });
+      request.on("error", () => resolve({ price: null, url }));
+      request.on("timeout", () => { request.destroy(); resolve({ price: null, url }); });
     });
   }
 
-  // Additional method for scraping from specific URL
-  async scrapeFromUrl(url, productName) {
-    return new Promise((resolve) => {
-      try {
-        const options = {
-          headers: {
-            "User-Agent":
-              "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-            Accept:
-              "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
-            "Accept-Language": "pl-PL,pl;q=0.9,en;q=0.8",
-          },
-          timeout: 15000,
-        };
+  // ─── Product management ──────────────────────────────────────────────────
 
-        const request = https.get(url, options, (response) => {
-          let data = "";
-
-          response.on("data", (chunk) => {
-            data += chunk;
-          });
-
-          response.on("end", () => {
-            try {
-              let foundPrice = null;
-
-              const pricePatterns = [
-                /(\d+[\.,]\d+)\s*(zł|PLN|злотых)/gi,
-                /(\d+[\.,]\d+)\s*PLN/gi,
-                /(\d+[\.,]\d+)\s*zł/gi,
-                /(\d+[\.,]\d+)\s*злотых/gi,
-              ];
-
-              for (const pattern of pricePatterns) {
-                const matches = data.match(pattern);
-                if (matches) {
-                  for (const match of matches) {
-                    const priceMatch = match.match(/(\d+[\.,]\d+)/);
-                    if (priceMatch) {
-                      const price = parseFloat(priceMatch[1].replace(",", "."));
-                      if (price >= 10 && price <= 10000) {
-                        foundPrice = price;
-                        break;
-                      }
-                    }
-                  }
-                  if (foundPrice) break;
-                }
-              }
-
-              resolve({ price: foundPrice, url: url });
-            } catch (error) {
-              console.error(
-                `Error parsing HTML for ${productName}:`,
-                error.message
-              );
-              resolve({ price: null, url: url });
-            }
-          });
-        });
-
-        request.on("error", (error) => {
-          console.error(`Error requesting ${productName}:`, error.message);
-          resolve({ price: null, url: url });
-        });
-
-        request.on("timeout", () => {
-          request.destroy();
-          console.error(`Timeout requesting ${productName}`);
-          resolve({ price: null, url: url });
-        });
-      } catch (error) {
-        console.error(
-          `Error scraping price for ${productName}:`,
-          error.message
-        );
-        resolve({ price: null, url: url });
-      }
-    });
-  }
-
-  updateProductPrice(
-    productId,
-    price,
-    foundUrl = null,
-    store = null,
-    storeUrl = null
-  ) {
+  updateProductPrice(productId, price, foundUrl = null, store = null, storeUrl = null) {
     const now = new Date().toISOString();
     const products = this.loadProducts();
     const priceHistory = this.loadPriceHistory();
 
-    // Update product price
-    const productIndex = products.findIndex((p) => p.id === productId);
-    if (productIndex !== -1) {
-      products[productIndex].current_price = price;
-      products[productIndex].last_checked = now;
-      if (foundUrl) {
-        products[productIndex].found_url = foundUrl;
-      }
-      if (store) {
-        products[productIndex].found_store = store;
-      }
-      if (storeUrl) {
-        products[productIndex].found_store_url = storeUrl;
-      }
+    const idx = products.findIndex((p) => p.id === productId);
+    if (idx !== -1) {
+      products[idx].current_price = price;
+      products[idx].last_checked = now;
+      if (foundUrl) products[idx].found_url = foundUrl;
+      if (store) products[idx].found_store = store;
+      if (storeUrl) products[idx].found_store_url = storeUrl;
       this.saveProducts(products);
     }
 
-    // Add to price history
-    priceHistory.push({
-      id: Date.now(),
-      product_id: productId,
-      price: price,
-      store: store,
-      checked_at: now,
-    });
+    priceHistory.push({ id: Date.now(), product_id: productId, price, store, checked_at: now });
     this.savePriceHistory(priceHistory);
 
-    // Send product update event to UI
-    if (productIndex !== -1) {
-      this.emit("product-updated", products[productIndex]);
-    }
+    if (idx !== -1) this.emit("product-updated", products[idx]);
   }
 
   checkPriceAlert(productId, productName, currentPrice) {
@@ -781,112 +551,110 @@ class PriceChecker {
     const product = products.find((p) => p.id === productId);
 
     if (product && currentPrice <= product.target_price) {
-      notifier.notify({
-        title: "Price Checker - Great price found!",
-        message: `Product "${productName}" now costs ${currentPrice.toFixed(
-          2
-        )} PLN (target price: ${product.target_price.toFixed(2)})`,
-        icon: path.join(__dirname, "icon.png"),
-        sound: true,
-        timeout: 10,
-      });
+      // Notify electron.js for tray icon + balloon + sound
+      if (this.onAlert) {
+        this.onAlert({
+          productName,
+          currentPrice,
+          targetPrice: product.target_price,
+        });
+      }
+    }
+  }
+
+  async checkProductById(productId) {
+    const products = this.loadProducts();
+    const product = products.find((p) => p.id === productId);
+    if (!product || product.is_checking) return;
+
+    try {
+      this.setCheckingStatus(productId, true);
+      const result = await this.scrapePriceWithTarget(product.name, product.url, product.target_price);
+      if (result && result.price) {
+        this.updateProductPrice(productId, result.price, result.url, result.store, result.storeUrl);
+        this.checkPriceAlert(productId, product.name, result.price);
+      } else {
+        this.updateLastChecked(productId);
+      }
+    } catch (error) {
+      console.error(`Error checking ${product.name}:`, error);
+      this.updateLastChecked(productId);
+    } finally {
+      this.setCheckingStatus(productId, false);
     }
   }
 
   async checkAllPrices() {
+    if (this.isCheckingAll) {
+      console.log("Price check already running, skipping.");
+      return;
+    }
+
+    this.isCheckingAll = true;
     const products = this.loadProducts();
-    const activeProducts = products.filter((p) => p.is_active !== false);
+    const active = products.filter((p) => p.is_active !== false);
 
-    console.log(`🔍 Checking prices for ${activeProducts.length} products...`);
+    console.log(`🔍 Checking prices for ${active.length} product(s)...`);
 
-    for (const product of activeProducts) {
+    for (const product of active) {
       try {
         console.log(`📦 Checking: ${product.name}`);
-
-        // Set checking flag
         this.setCheckingStatus(product.id, true);
 
-        const result = await this.scrapePriceWithTarget(
-          product.name,
-          product.url,
-          product.target_price
-        );
+        const result = await this.scrapePriceWithTarget(product.name, product.url, product.target_price);
+
         if (result && result.price) {
-          console.log(`💰 Found price: ${result.price} PLN at ${result.store}`);
-          if (result.url) {
-            console.log(`🔗 Link: ${result.url}`);
-          }
-          this.updateProductPrice(
-            product.id,
-            result.price,
-            result.url,
-            result.store,
-            result.storeUrl
-          );
+          console.log(`💰 ${result.price} PLN at ${result.store || "unknown"}`);
+          this.updateProductPrice(product.id, result.price, result.url, result.store, result.storeUrl);
           this.checkPriceAlert(product.id, product.name, result.price);
         } else {
           console.log(`❌ Price not found for ${product.name}`);
-          // Update last checked time even if price not found
           this.updateLastChecked(product.id);
         }
-
-        // Reset checking flag
-        this.setCheckingStatus(product.id, false);
       } catch (error) {
-        console.error(`Error checking price for ${product.name}:`, error);
-        // Update last checked time even on error
+        console.error(`Error checking ${product.name}:`, error);
         this.updateLastChecked(product.id);
-        // Reset checking flag on error
+      } finally {
         this.setCheckingStatus(product.id, false);
       }
+
+      if (active.indexOf(product) < active.length - 1) {
+        await this.delay(PRODUCT_DELAY_MS);
+      }
     }
+
+    this.isCheckingAll = false;
   }
 
   updateLastChecked(productId) {
     const now = new Date().toISOString();
     const products = this.loadProducts();
-    const productIndex = products.findIndex((p) => p.id === productId);
-    if (productIndex !== -1) {
-      products[productIndex].last_checked = now;
+    const idx = products.findIndex((p) => p.id === productId);
+    if (idx !== -1) {
+      products[idx].last_checked = now;
       this.saveProducts(products);
     }
   }
 
   setCheckingStatus(productId, isChecking) {
     const products = this.loadProducts();
-    const productIndex = products.findIndex((p) => p.id === productId);
-    if (productIndex !== -1) {
-      products[productIndex].is_checking = isChecking;
+    const idx = products.findIndex((p) => p.id === productId);
+    if (idx !== -1) {
+      products[idx].is_checking = isChecking;
       this.saveProducts(products);
-
-      // Send checking status update event
-      this.emit("product-checking-status-updated", {
-        productId,
-        isChecking,
-        product: products[productIndex],
-      });
+      this.emit("product-checking-status-updated", { productId, isChecking, product: products[idx] });
     }
   }
 
   startMonitoring() {
-    console.log("Price Checker started. Checking prices every hour...");
-
-    // Immediate check on startup
-    setTimeout(() => {
-      this.checkAllPrices();
-    }, 2000);
-
-    // Check every hour
-    setInterval(() => {
-      this.checkAllPrices();
-    }, 60 * 60 * 1000);
+    if (this.monitoringStarted) return;
+    this.monitoringStarted = true;
+    console.log("Price Checker started. Checking every hour...");
+    setTimeout(() => { this.checkAllPrices(); }, 2000);
   }
 
   getProducts() {
-    return new Promise((resolve) => {
-      const products = this.loadProducts();
-      resolve(products);
-    });
+    return Promise.resolve(this.loadProducts());
   }
 
   addProduct(name, targetPrice, url = null) {
@@ -894,23 +662,21 @@ class PriceChecker {
       const products = this.loadProducts();
       const newProduct = {
         id: Date.now(),
-        name: name,
+        name,
         target_price: targetPrice,
         current_price: null,
-        url: url,
+        url: url || null,
         found_url: null,
+        found_store: null,
+        found_store_url: null,
         last_checked: null,
         is_active: true,
         is_checking: false,
         created_at: new Date().toISOString(),
       };
-
       products.push(newProduct);
       this.saveProducts(products);
-
-      // Send product added event
       this.emit("product-added", newProduct);
-
       resolve({ id: newProduct.id });
     });
   }
@@ -919,18 +685,12 @@ class PriceChecker {
     return new Promise((resolve) => {
       const products = this.loadProducts();
       const productToDelete = products.find((p) => p.id === productId);
-      const filteredProducts = products.filter((p) => p.id !== productId);
-      this.saveProducts(filteredProducts);
-
-      // Send product deleted event
-      if (productToDelete) {
-        this.emit("product-deleted", { productId, product: productToDelete });
-      }
-
+      const filtered = products.filter((p) => p.id !== productId);
+      this.saveProducts(filtered);
+      if (productToDelete) this.emit("product-deleted", { productId, product: productToDelete });
       resolve({ success: true });
     });
   }
 }
 
-// Export class for use in Electron
 module.exports = PriceChecker;

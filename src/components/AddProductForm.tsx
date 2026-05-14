@@ -1,9 +1,12 @@
-import React, { useState, useEffect } from "react";
+import React, { useState } from "react";
+import { Loader2, Plus } from "lucide-react";
 import { AddProductData } from "../types";
-import { FaSpinner, FaPlus } from "react-icons/fa";
+import { Button } from "./ui/button";
+import { Input } from "./ui/input";
+import { Label } from "./ui/label";
 
 interface AddProductFormProps {
-  onAddProduct: (product: AddProductData) => Promise<void>;
+  onAddProduct: (product: AddProductData) => Promise<boolean>;
   loading: boolean;
 }
 
@@ -16,110 +19,99 @@ const AddProductForm: React.FC<AddProductFormProps> = ({
     targetPrice: 0,
     url: "",
   });
+  const [validationError, setValidationError] = useState("");
 
-  // Track loading changes for debugging
-  useEffect(() => {
-    console.log("AddProductForm loading state:", loading);
-  }, [loading]);
+  const handleSubmit = async (event: React.FormEvent) => {
+    event.preventDefault();
+    setValidationError("");
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-
-    if (!formData.name.trim() || formData.targetPrice <= 0) {
-      alert("Please fill in all required fields");
+    if (!formData.name.trim()) {
+      setValidationError("Введите название товара");
       return;
     }
 
-    try {
-      await onAddProduct(formData);
-      // Reset form only on successful addition
+    if (formData.targetPrice <= 0) {
+      setValidationError("Укажите целевую цену больше нуля");
+      return;
+    }
+
+    const success = await onAddProduct({
+      ...formData,
+      name: formData.name.trim(),
+      url: formData.url?.trim(),
+    });
+
+    if (success) {
       setFormData({ name: "", targetPrice: 0, url: "" });
-      console.log("Form reset after successful addition");
-    } catch (error) {
-      console.error("Error adding product:", error);
-      // On error, form remains filled but inputs are unlocked
     }
   };
 
-  const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const { name, value } = e.target;
-    console.log(`Input change: ${name} = ${value}, loading: ${loading}`);
-    setFormData((prev) => ({
-      ...prev,
-      [name]: name === "targetPrice" ? parseFloat(value) || 0 : value,
+  const handleInputChange = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const { name, value } = event.target;
+    setFormData((current) => ({
+      ...current,
+      [name]: name === "targetPrice" ? Number.parseFloat(value) || 0 : value,
     }));
   };
 
   return (
-    <div className="px-4 pb-2">
-      <form
-        key={loading ? "loading" : "ready"}
-        onSubmit={handleSubmit}
-        className="flex flex-col gap-3"
-      >
-        <div className="flex flex-col gap-1">
-          <label
-            htmlFor="name"
-            className="block text-xs font-medium text-gray-600"
-          >
-            Product name *
-          </label>
-          <input
-            type="text"
-            id="name"
-            name="name"
-            value={formData.name}
-            onChange={handleInputChange}
-            className="w-full px-3 py-2 text-sm border border-gray-300 rounded-md focus:border-blue-500 focus:ring-1 focus:ring-blue-500 focus:outline-none transition-colors"
-            placeholder="Product name"
-            disabled={loading}
-            readOnly={false}
-            required
-          />
-        </div>
-
-        <div className="flex flex-col gap-1">
-          <label
-            htmlFor="targetPrice"
-            className="block text-xs font-medium text-gray-600"
-          >
-            Target price (PLN) *
-          </label>
-          <input
-            type="number"
-            id="targetPrice"
-            name="targetPrice"
-            value={formData.targetPrice || ""}
-            onChange={handleInputChange}
-            className="w-full px-3 py-2 text-sm border border-gray-300 rounded-md focus:border-blue-500 focus:ring-1 focus:ring-blue-500 focus:outline-none transition-colors"
-            placeholder="400"
-            min="0"
-            step="0.01"
-            disabled={loading}
-            readOnly={false}
-            required
-          />
-        </div>
-
-        <button
-          type="submit"
-          className="w-full bg-blue-600 hover:bg-blue-700 text-white font-medium py-2 px-4 rounded-md transition-colors text-sm flex items-center justify-center gap-2"
+    <form onSubmit={handleSubmit} className="space-y-3">
+      <div className="space-y-1.5">
+        <Label htmlFor="name">Название</Label>
+        <Input
+          id="name"
+          name="name"
+          value={formData.name}
+          onChange={handleInputChange}
+          placeholder="Например, RTX 4070"
           disabled={loading}
-        >
-          {loading ? (
-            <>
-              <FaSpinner className="animate-spin h-4 w-4" />
-              Adding...
-            </>
-          ) : (
-            <>
-              <FaPlus className="h-4 w-4" />
-              Add product
-            </>
-          )}
-        </button>
-      </form>
-    </div>
+          autoFocus
+          required
+        />
+      </div>
+
+      <div className="space-y-1.5">
+        <Label htmlFor="targetPrice">Целевая цена, PLN</Label>
+        <Input
+          id="targetPrice"
+          name="targetPrice"
+          type="number"
+          min="0"
+          step="0.01"
+          value={formData.targetPrice || ""}
+          onChange={handleInputChange}
+          placeholder="400"
+          disabled={loading}
+          required
+        />
+      </div>
+
+      <div className="space-y-1.5">
+        <Label htmlFor="url">Ссылка на товар</Label>
+        <Input
+          id="url"
+          name="url"
+          type="url"
+          value={formData.url || ""}
+          onChange={handleInputChange}
+          placeholder="https://..."
+          disabled={loading}
+        />
+      </div>
+
+      {validationError && (
+        <p className="text-xs text-zinc-300">{validationError}</p>
+      )}
+
+      <Button type="submit" className="w-full" disabled={loading}>
+        {loading ? (
+          <Loader2 className="h-4 w-4 animate-spin" />
+        ) : (
+          <Plus className="h-4 w-4" />
+        )}
+        Добавить
+      </Button>
+    </form>
   );
 };
 
