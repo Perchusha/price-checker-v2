@@ -148,6 +148,51 @@ async def extract_prices_from_page(page, url: str) -> list:
         return []
 
 
+_CF_CHALLENGE_TITLES = (
+    "Cierpliwości",  # Polish
+    "Just a moment",  # English
+    "Chwileczkę",
+    "Einen Moment",  # German (just in case)
+    "Un moment",  # French
+)
+
+
+async def _wait_for_cloudflare(page, timeout_ms: int = 20_000) -> bool:
+    """Wait for a Cloudflare Turnstile challenge to resolve.
+
+    The Turnstile widget renders inside a dynamically-injected cross-origin iframe.
+    Its checkbox sits in a shadow DOM so direct selectors don't reach it.
+    Clicking the frame body is enough to trigger the Turnstile evaluation.
+    """
+    interval = 2_000
+    elapsed = 0
+    clicked = False
+
+    while elapsed < timeout_ms:
+        title = await page.title()
+        if not any(p in title for p in _CF_CHALLENGE_TITLES):
+            return True
+
+        if not clicked:
+            # Find the Cloudflare frame via Playwright's frame list (not DOM iframes)
+            cf_frame = next(
+                (f for f in page.frames if "challenges.cloudflare.com" in f.url),
+                None,
+            )
+            if cf_frame:
+                try:
+                    await cf_frame.locator("body").click(timeout=3_000)
+                    log("  Cloudflare Turnstile: clicked frame body")
+                    clicked = True
+                except Exception:
+                    pass
+
+        await page.wait_for_timeout(interval)
+        elapsed += interval
+
+    return False
+
+
 async def scrape_url(browser, url_info: dict) -> Optional[dict]:
     """Visit one URL with Camoufox and return the best price found."""
     url = url_info.get("url", "")
@@ -159,9 +204,20 @@ async def scrape_url(browser, url_info: dict) -> Optional[dict]:
 
     page = await browser.new_page()
     try:
-        log(f"→ {store}: {url[:90]}")
+        log(f"-> {store}: {url[:90]}")
         await page.goto(url, wait_until="domcontentloaded", timeout=30_000)
-        await page.wait_for_timeout(2_500)
+
+        # Handle Cloudflare challenge pages before extraction
+        title = await page.title()
+        if any(p in title for p in _CF_CHALLENGE_TITLES):
+            log(f"  {store}: Cloudflare challenge detected, waiting...")
+            passed = await _wait_for_cloudflare(page, timeout_ms=15_000)
+            if not passed:
+                log(f"  {store}: Cloudflare challenge did not resolve")
+                return None
+            log(f"  {store}: Cloudflare challenge passed")
+
+        await page.wait_for_timeout(3_000)
 
         prices = await extract_prices_from_page(page, url)
         if not prices:
@@ -207,6 +263,7 @@ async def run(url_infos: list) -> list:
     async with AsyncCamoufox(
         headless=True,
         geoip=True,
+        humanize=True,
         locale=["pl-PL", "pl"],
         os="windows",
     ) as browser:

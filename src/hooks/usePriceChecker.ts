@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { AddProductData, Product } from "../types";
+import { AddProductData, Product, UpdateProductData } from "../types";
 import { AlertLoop, startAlertLoop } from "../lib/audio";
 
 const CHECK_INTERVAL_MS = 60 * 60 * 1000;
@@ -96,7 +96,7 @@ export function usePriceChecker() {
     };
 
     const handlePlayAlertSound = (_event: unknown, soundPath: string) => {
-      if (alertLoopRef.current) return; // already looping
+      if (alertLoopRef.current) return;
       alertLoopRef.current = startAlertLoop(soundPath);
       setIsAlertActive(true);
     };
@@ -173,6 +173,33 @@ export function usePriceChecker() {
     []
   );
 
+  const updateProduct = useCallback(
+    async (productId: number, productData: UpdateProductData) => {
+      if (!ipcRenderer) return false;
+
+      setLoading(true);
+      setMessage("");
+
+      try {
+        const result = await ipcRenderer.invoke("update-product", productId, productData);
+        if (!result.success) {
+          setMessage(result.error || "Не удалось сохранить товар");
+          return false;
+        }
+
+        setMessage(`Товар «${productData.name}» сохранён`);
+        return true;
+      } catch (error) {
+        console.error("Error updating product:", error);
+        setMessage("Не удалось сохранить товар");
+        return false;
+      } finally {
+        setLoading(false);
+      }
+    },
+    []
+  );
+
   const deleteProduct = useCallback(async (productId: number) => {
     if (!ipcRenderer) return;
     if (!window.confirm("Удалить этот товар из отслеживания?")) return;
@@ -237,6 +264,7 @@ export function usePriceChecker() {
     timeUntilNextCheck,
     isAlertActive,
     addProduct,
+    updateProduct,
     deleteProduct,
     checkPricesNow,
     checkProductPrice,

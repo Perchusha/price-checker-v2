@@ -92,8 +92,11 @@ class PriceChecker {
 
   async runScheduledCheck() {
     this.stopTimer();
-    await this.checkAllPrices();
-    this.startTimer();
+    try {
+      await this.checkAllPrices();
+    } finally {
+      this.startTimer();
+    }
   }
 
   delay(ms) {
@@ -591,39 +594,41 @@ class PriceChecker {
     }
 
     this.isCheckingAll = true;
-    const products = this.loadProducts();
-    const active = products.filter((p) => p.is_active !== false);
+    try {
+      const products = this.loadProducts();
+      const active = products.filter((p) => p.is_active !== false);
 
-    console.log(`🔍 Checking prices for ${active.length} product(s)...`);
+      console.log(`🔍 Checking prices for ${active.length} product(s)...`);
 
-    for (const product of active) {
-      try {
-        console.log(`📦 Checking: ${product.name}`);
-        this.setCheckingStatus(product.id, true);
+      for (const product of active) {
+        try {
+          console.log(`📦 Checking: ${product.name}`);
+          this.setCheckingStatus(product.id, true);
 
-        const result = await this.scrapePriceWithTarget(product.name, product.url, product.target_price);
+          const result = await this.scrapePriceWithTarget(product.name, product.url, product.target_price);
 
-        if (result && result.price) {
-          console.log(`💰 ${result.price} PLN at ${result.store || "unknown"}`);
-          this.updateProductPrice(product.id, result.price, result.url, result.store, result.storeUrl);
-          this.checkPriceAlert(product.id, product.name, result.price);
-        } else {
-          console.log(`❌ Price not found for ${product.name}`);
+          if (result && result.price) {
+            console.log(`💰 ${result.price} PLN at ${result.store || "unknown"}`);
+            this.updateProductPrice(product.id, result.price, result.url, result.store, result.storeUrl);
+            this.checkPriceAlert(product.id, product.name, result.price);
+          } else {
+            console.log(`❌ Price not found for ${product.name}`);
+            this.updateLastChecked(product.id);
+          }
+        } catch (error) {
+          console.error(`Error checking ${product.name}:`, error);
           this.updateLastChecked(product.id);
+        } finally {
+          this.setCheckingStatus(product.id, false);
         }
-      } catch (error) {
-        console.error(`Error checking ${product.name}:`, error);
-        this.updateLastChecked(product.id);
-      } finally {
-        this.setCheckingStatus(product.id, false);
-      }
 
-      if (active.indexOf(product) < active.length - 1) {
-        await this.delay(PRODUCT_DELAY_MS);
+        if (active.indexOf(product) < active.length - 1) {
+          await this.delay(PRODUCT_DELAY_MS);
+        }
       }
+    } finally {
+      this.isCheckingAll = false;
     }
-
-    this.isCheckingAll = false;
   }
 
   updateLastChecked(productId) {
@@ -633,6 +638,7 @@ class PriceChecker {
     if (idx !== -1) {
       products[idx].last_checked = now;
       this.saveProducts(products);
+      this.emit("product-updated", products[idx]);
     }
   }
 
@@ -678,6 +684,43 @@ class PriceChecker {
       this.saveProducts(products);
       this.emit("product-added", newProduct);
       resolve({ id: newProduct.id });
+    });
+  }
+
+  updateProduct(productId, productData) {
+    return new Promise((resolve) => {
+      const products = this.loadProducts();
+      const idx = products.findIndex((p) => p.id === productId);
+
+      if (idx === -1) {
+        resolve({ success: false, error: "Товар не найден" });
+        return;
+      }
+
+      const name = String(productData.name || "").trim();
+      const targetPrice = Number(productData.targetPrice);
+      const url = productData.url ? String(productData.url).trim() : "";
+
+      if (!name) {
+        resolve({ success: false, error: "Введите название товара" });
+        return;
+      }
+
+      if (!Number.isFinite(targetPrice) || targetPrice <= 0) {
+        resolve({ success: false, error: "Укажите целевую цену больше нуля" });
+        return;
+      }
+
+      products[idx] = {
+        ...products[idx],
+        name,
+        target_price: targetPrice,
+        url: url || null,
+      };
+
+      this.saveProducts(products);
+      this.emit("product-updated", products[idx]);
+      resolve({ success: true, product: products[idx] });
     });
   }
 

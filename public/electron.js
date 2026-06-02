@@ -173,6 +173,15 @@ ipcMain.handle("add-product", async (event, product) => {
   }
 });
 
+ipcMain.handle("update-product", async (event, productId, product) => {
+  try {
+    return await priceChecker.updateProduct(productId, product);
+  } catch (error) {
+    console.error("Ошибка при сохранении товара:", error);
+    return { success: false, error: error.message };
+  }
+});
+
 ipcMain.handle("delete-product", async (event, productId) => {
   try {
     return await priceChecker.deleteProduct(productId);

@@ -1,25 +1,50 @@
-import React, { useState } from "react";
-import { Loader2, Plus } from "lucide-react";
-import { AddProductData } from "../types";
+import React, { useEffect, useMemo, useState } from "react";
+import { Loader2, Plus, Save } from "lucide-react";
+import { AddProductData, Product, UpdateProductData } from "../types";
 import { Button } from "./ui/button";
 import { Input } from "./ui/input";
 import { Label } from "./ui/label";
 
+type ProductFormData = AddProductData | UpdateProductData;
+
 interface AddProductFormProps {
-  onAddProduct: (product: AddProductData) => Promise<boolean>;
+  onSubmit: (product: ProductFormData) => Promise<boolean>;
   loading: boolean;
+  initialProduct?: Product | null;
+  submitLabel?: string;
 }
 
+const emptyFormData: AddProductData = {
+  name: "",
+  targetPrice: 0,
+  url: "",
+};
+
 const AddProductForm: React.FC<AddProductFormProps> = ({
-  onAddProduct,
+  onSubmit,
   loading,
+  initialProduct,
+  submitLabel,
 }) => {
-  const [formData, setFormData] = useState<AddProductData>({
-    name: "",
-    targetPrice: 0,
-    url: "",
-  });
+  const isEditing = Boolean(initialProduct);
+  const initialFormData = useMemo<ProductFormData>(
+    () =>
+      initialProduct
+        ? {
+            name: initialProduct.name,
+            targetPrice: initialProduct.target_price,
+            url: initialProduct.url || "",
+          }
+        : emptyFormData,
+    [initialProduct]
+  );
+  const [formData, setFormData] = useState<ProductFormData>(initialFormData);
   const [validationError, setValidationError] = useState("");
+
+  useEffect(() => {
+    setFormData(initialFormData);
+    setValidationError("");
+  }, [initialFormData]);
 
   const handleSubmit = async (event: React.FormEvent) => {
     event.preventDefault();
@@ -35,14 +60,14 @@ const AddProductForm: React.FC<AddProductFormProps> = ({
       return;
     }
 
-    const success = await onAddProduct({
+    const success = await onSubmit({
       ...formData,
       name: formData.name.trim(),
       url: formData.url?.trim(),
     });
 
-    if (success) {
-      setFormData({ name: "", targetPrice: 0, url: "" });
+    if (success && !isEditing) {
+      setFormData(emptyFormData);
     }
   };
 
@@ -106,10 +131,12 @@ const AddProductForm: React.FC<AddProductFormProps> = ({
       <Button type="submit" className="w-full" disabled={loading}>
         {loading ? (
           <Loader2 className="h-4 w-4 animate-spin" />
+        ) : isEditing ? (
+          <Save className="h-4 w-4" />
         ) : (
           <Plus className="h-4 w-4" />
         )}
-        Добавить
+        {submitLabel || (isEditing ? "Сохранить" : "Добавить")}
       </Button>
     </form>
   );

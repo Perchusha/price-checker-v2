@@ -27,9 +27,12 @@ import {
   getTimerProgress,
 } from "./lib/product-view";
 import { usePriceChecker } from "./hooks/usePriceChecker";
+import { Product, UpdateProductData } from "./types";
 
 function App() {
   const [addDialogOpen, setAddDialogOpen] = useState(false);
+  const [editDialogOpen, setEditDialogOpen] = useState(false);
+  const [editingProduct, setEditingProduct] = useState<Product | null>(null);
   const {
     products,
     loading,
@@ -38,6 +41,7 @@ function App() {
     timeUntilNextCheck,
     isAlertActive,
     addProduct,
+    updateProduct,
     deleteProduct,
     checkPricesNow,
     checkProductPrice,
@@ -50,6 +54,27 @@ function App() {
     const success = await addProduct(...args);
     if (success) setAddDialogOpen(false);
     return success;
+  };
+
+  const handleEditProduct = (product: Product) => {
+    setEditingProduct(product);
+    setEditDialogOpen(true);
+  };
+
+  const handleUpdateProduct = async (productData: UpdateProductData) => {
+    if (!editingProduct) return false;
+
+    const success = await updateProduct(editingProduct.id, productData);
+    if (success) {
+      setEditDialogOpen(false);
+      setEditingProduct(null);
+    }
+    return success;
+  };
+
+  const handleEditDialogChange = (open: boolean) => {
+    setEditDialogOpen(open);
+    if (!open) setEditingProduct(null);
   };
 
   const activeChecks = products.filter((product) => product.is_checking).length;
@@ -108,8 +133,9 @@ function App() {
                     </DialogDescription>
                   </DialogHeader>
                   <AddProductForm
-                    onAddProduct={handleAddProduct}
+                    onSubmit={handleAddProduct}
                     loading={loading}
+                    submitLabel="Добавить"
                   />
                 </DialogContent>
               </Dialog>
@@ -158,7 +184,7 @@ function App() {
         </header>
 
         {isAlertActive && (
-          <div className="shrink-0 flex items-center justify-between gap-3 border-b border-red-500/30 bg-red-500/10 px-3 py-2">
+          <div className="flex shrink-0 items-center justify-between gap-3 border-b border-red-500/30 bg-red-500/10 px-3 py-2">
             <div className="flex items-center gap-2 text-sm font-medium text-red-500">
               <span className="animate-pulse text-base leading-none">●</span>
               Найдена цена ниже целевой!
@@ -175,14 +201,34 @@ function App() {
           </div>
         )}
 
-        <main className="min-h-0 flex-1 py-3">
+        <main className="min-h-0 flex-1 overflow-hidden py-3">
           <ProductList
             products={products}
             onDeleteProduct={deleteProduct}
             onOpenLink={openExternalLink}
             onCheckProduct={checkProductPrice}
+            onEditProduct={handleEditProduct}
           />
         </main>
+
+        <Dialog open={editDialogOpen} onOpenChange={handleEditDialogChange}>
+          <DialogContent>
+            <DialogHeader>
+              <DialogTitle>Редактировать товар</DialogTitle>
+              <DialogDescription>
+                Изменения сохранятся без автоматической проверки цены.
+              </DialogDescription>
+            </DialogHeader>
+            {editingProduct && (
+              <AddProductForm
+                onSubmit={handleUpdateProduct}
+                loading={loading}
+                initialProduct={editingProduct}
+                submitLabel="Сохранить"
+              />
+            )}
+          </DialogContent>
+        </Dialog>
       </div>
     </div>
   );

@@ -4,6 +4,7 @@ import {
   Link2,
   Loader2,
   PackageSearch,
+  Pencil,
   RefreshCw,
   Trash2,
 } from "lucide-react";
@@ -24,6 +25,7 @@ interface ProductListProps {
   onDeleteProduct: (productId: number) => Promise<void>;
   onOpenLink: (url: string) => void;
   onCheckProduct: (productId: number) => void;
+  onEditProduct: (product: Product) => void;
 }
 
 const statusVariantByTone = {
@@ -39,6 +41,7 @@ const ProductList: React.FC<ProductListProps> = ({
   onDeleteProduct,
   onOpenLink,
   onCheckProduct,
+  onEditProduct,
 }) => {
   if (products.length === 0) {
     return (
@@ -49,7 +52,7 @@ const ProductList: React.FC<ProductListProps> = ({
           </div>
           <h2 className="text-sm font-semibold text-foreground">Список пуст</h2>
           <p className="mt-1 max-w-xs text-xs text-muted-foreground">
-            Добавьте товар, чтобы отслеживать текущую цену и получать быстрый доступ к найденному магазину.
+            Добавьте товар, чтобы отслеживать текущую цену и быстро открывать найденный магазин.
           </p>
         </div>
       </div>
@@ -68,62 +71,66 @@ const ProductList: React.FC<ProductListProps> = ({
             <Card
               key={product.id}
               className={cn(
-                "grid grid-cols-[minmax(0,1fr)_auto] gap-3 p-3",
+                "p-3",
                 product.is_checking && "border-primary/70 shadow-[0_0_0_1px_hsl(var(--primary)/0.3)]"
               )}
             >
-              <div className="min-w-0 space-y-2">
-                <div className="flex min-w-0 items-start gap-2">
-                  <div className="min-w-0 flex-1">
-                    <h3 className="truncate text-sm font-semibold text-foreground">
-                      {product.name}
-                    </h3>
-                    <p className="mt-0.5 text-[11px] text-muted-foreground">
-                      Проверено: {formatDateTime(product.last_checked)}
-                    </p>
-                  </div>
-                  <Badge variant={statusVariantByTone[status.tone]}>
-                    <StatusIcon
-                      className={cn(
-                        "h-3 w-3",
-                        status.tone === "checking" && "animate-spin"
-                      )}
-                    />
-                    {status.label}
-                  </Badge>
+              <div className="flex min-w-0 items-start justify-between gap-3">
+                <div className="min-w-0">
+                  <h3 className="truncate text-sm font-semibold text-foreground">
+                    {product.name}
+                  </h3>
+                  <p className="mt-0.5 text-[11px] text-muted-foreground">
+                    Проверено: {formatDateTime(product.last_checked)}
+                  </p>
                 </div>
 
-                <div className="grid grid-cols-2 gap-2">
-                  <div className="rounded-md border border-border bg-background px-2 py-1.5">
-                    <div className="text-[10px] uppercase text-muted-foreground">
-                      Цель
-                    </div>
-                    <div className="text-sm font-semibold text-foreground">
-                      {formatPrice(product.target_price)}
-                    </div>
+                <Badge variant={statusVariantByTone[status.tone]} className="shrink-0">
+                  <StatusIcon
+                    className={cn(
+                      "h-3 w-3",
+                      status.tone === "checking" && "animate-spin"
+                    )}
+                  />
+                  {status.label}
+                </Badge>
+              </div>
+
+              <div className="mt-3 grid grid-cols-[minmax(0,1fr)_minmax(0,1fr)] gap-2">
+                <div className="min-w-0 rounded-md border border-border bg-background px-2 py-1.5">
+                  <div className="text-[10px] uppercase text-muted-foreground">
+                    Цель
                   </div>
-                  <div className="rounded-md border border-border bg-background px-2 py-1.5">
-                    <div className="text-[10px] uppercase text-muted-foreground">
-                      Сейчас
-                    </div>
-                    <div
-                      className={cn(
-                        "text-sm font-semibold",
-                        product.current_price == null && "text-muted-foreground",
-                        product.current_price != null &&
-                          (targetReached ? "text-zinc-100" : "text-zinc-500")
-                      )}
-                    >
-                      {formatPrice(product.current_price)}
-                    </div>
+                  <div className="truncate text-sm font-semibold text-foreground">
+                    {formatPrice(product.target_price)}
                   </div>
+                </div>
+                <div className="min-w-0 rounded-md border border-border bg-background px-2 py-1.5">
+                  <div className="text-[10px] uppercase text-muted-foreground">
+                    Сейчас
+                  </div>
+                  <div
+                    className={cn(
+                      "truncate text-sm font-semibold",
+                      product.current_price == null && "text-muted-foreground",
+                      product.current_price != null &&
+                        (targetReached ? "text-emerald-400" : "text-foreground")
+                    )}
+                  >
+                    {formatPrice(product.current_price)}
+                  </div>
+                  {product.found_store && (
+                    <div className="mt-0.5 truncate text-[11px] text-muted-foreground">
+                      {product.found_store}
+                    </div>
+                  )}
                 </div>
               </div>
 
-              <div className="flex w-24 flex-col items-stretch gap-1.5">
+              <div className="mt-3 flex items-center justify-end gap-1.5">
                 <Button
                   type="button"
-                  size="sm"
+                  size="icon"
                   variant="secondary"
                   disabled={product.is_checking}
                   onClick={() => onCheckProduct(product.id)}
@@ -134,46 +141,55 @@ const ProductList: React.FC<ProductListProps> = ({
                   ) : (
                     <RefreshCw className="h-3.5 w-3.5" />
                   )}
-                  Проверить
+                  <span className="sr-only">Проверить</span>
+                </Button>
+
+                <Button
+                  type="button"
+                  size="icon"
+                  variant="secondary"
+                  onClick={() => onEditProduct(product)}
+                  title="Редактировать товар"
+                >
+                  <Pencil className="h-3.5 w-3.5" />
+                  <span className="sr-only">Редактировать</span>
                 </Button>
 
                 {product.found_url && (
                   <Button
                     type="button"
-                    size="sm"
+                    size="icon"
                     onClick={() => onOpenLink(product.found_url!)}
                     title={product.found_store || "Открыть найденный товар"}
                   >
                     <ExternalLink className="h-3.5 w-3.5" />
-                    <span className="truncate">
-                      {product.found_store || "Магазин"}
-                    </span>
+                    <span className="sr-only">Открыть найденный товар</span>
                   </Button>
                 )}
 
                 {product.url && (
                   <Button
                     type="button"
-                    size="sm"
+                    size="icon"
                     variant="secondary"
                     onClick={() => onOpenLink(product.url!)}
                     title="Открыть исходную ссылку"
                   >
                     <Link2 className="h-3.5 w-3.5" />
-                    Ссылка
+                    <span className="sr-only">Открыть исходную ссылку</span>
                   </Button>
                 )}
 
                 <Button
                   type="button"
-                  size="sm"
+                  size="icon"
                   variant="ghost"
-                  className="mt-auto text-muted-foreground hover:text-zinc-100"
+                  className="text-muted-foreground hover:text-red-400"
                   onClick={() => onDeleteProduct(product.id)}
                   title="Удалить товар"
                 >
                   <Trash2 className="h-3.5 w-3.5" />
-                  Удалить
+                  <span className="sr-only">Удалить</span>
                 </Button>
               </div>
             </Card>

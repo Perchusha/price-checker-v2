@@ -25,3 +25,9 @@ export interface AddProductData {
   targetPrice: number;
   url?: string; // Optional product link
 }
+
+export interface UpdateProductData {
+  name: string;
+  targetPrice: number;
+  url?: string; // Optional product link
+}
